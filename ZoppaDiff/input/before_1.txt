@@ -1,0 +1,20 @@
+001: apple
+002: banana
+003: cherry
+004: date
+005: elderberry
+006: fig
+007: grape
+008: honeydew
+009: ita palm
+010: jackfruit
+011: kiwi
+012: lemon
+013: mango
+014: nectarine
+015: orange
+016: papaya
+017: quince
+018: raspberry
+019: strawberry
+020: tangerine
