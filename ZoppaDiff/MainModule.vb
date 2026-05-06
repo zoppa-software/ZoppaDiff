@@ -11,6 +11,9 @@ Public Module MainModule
     ''' <summary>エンコードスイッチ名です。</summary>
     Public Const ENCODE_SW As String = "encode"
 
+    ''' <summary>行番号スイッチ名です。</summary>
+    Public Const LINE_SW As String = "line"
+
     ''' <summary>
     ''' エントリポイント。
     ''' </summary>
@@ -23,6 +26,7 @@ Public Module MainModule
             SetequiredParameter(True).
             SetValueName("source file path] [destination file path").
             SetSwitch(ENCODE_SW, "e"c, "encode", valueCount:=1, valueName:="encode", description:="文字コードを指定する(shift-jis,UTF-8など)").
+            SetSwitch(LINE_SW, "l"c, "line", valueCount:=0, valueName:="line", description:="行番号を表示する").
             Parse()
 
         ' Help、Version指定、もしくはエラーならば終了
@@ -46,21 +50,44 @@ Public Module MainModule
         Dim destinationStrs = ReadLines(parameters(1), encode, "比較先ファイルの読込に失敗しました")
 
         ' Diffを実行
+        WriteLine("比較元ファイル(s): " & parameters(0))
+        WriteLine("比較先ファイル(d): " & parameters(1))
+        WriteLine(" (s) <-> (d)")
+        WriteLine("--- 比較結果 ---")
         Dim diff = DiffModule.Diff(sourceStrs, destinationStrs)
-        For Each ln In diff
-            Select Case ln.EditType
-                Case DiffModule.EditTypeEnum.Insert
-                    Console.WriteLine("+ :" & ln.Destination)
-                Case DiffModule.EditTypeEnum.Delete
-                    Console.WriteLine("- :" & ln.Source)
-                Case DiffModule.EditTypeEnum.Match
-                    Console.WriteLine("   " & ln.Source)
-                Case DiffModule.EditTypeEnum.Diff
-                    Console.WriteLine("R :" & ln.EditString)
-                    Console.WriteLine(" s:" & ln.Source)
-                    Console.WriteLine(" d:" & ln.Destination)
-            End Select
-        Next
+        If analysis.HasSwitch(LINE_SW) Then
+            ' 行番号を表示する場合
+            For Each ln In diff
+                Select Case ln.EditType
+                    Case DiffModule.EditTypeEnum.Insert
+                        WriteLine(String.Format("<- (d){0:00000}|{1}", ln.Destination.Line, ln.Destination.Str))
+                    Case DiffModule.EditTypeEnum.Delete
+                        WriteLine(String.Format("-> (s){0:00000}|{1}", ln.Source.Line, ln.Source.Str))
+                    Case DiffModule.EditTypeEnum.Match
+                        WriteLine(String.Format("{0:00000}-{1:00000}|{2}", ln.Source.Line, ln.Destination.Line, ln.Source.Str))
+                    Case DiffModule.EditTypeEnum.Diff
+                        WriteLine(String.Format("Replace    |{0}", ln.EditString))
+                        WriteLine(String.Format("   (s){0:00000}|{1}", ln.Source.Line, ln.Source.Str))
+                        WriteLine(String.Format("   (d){0:00000}|{1}", ln.Destination.Line, ln.Destination.Str))
+                End Select
+            Next
+        Else
+            ' 行番号を表示しない場合（省略表示）
+            For Each ln In diff
+                Select Case ln.EditType
+                    Case DiffModule.EditTypeEnum.Insert
+                        WriteLine(String.Format("<-|{0}", ln.Destination.Str))
+                    Case DiffModule.EditTypeEnum.Delete
+                        WriteLine(String.Format("->|{0}", ln.Source.Str))
+                    Case DiffModule.EditTypeEnum.Match
+                        WriteLine(String.Format("   {0}", ln.Source.Str))
+                    Case DiffModule.EditTypeEnum.Diff
+                        WriteLine(String.Format("R |{0}", ln.EditString))
+                        WriteLine(String.Format(" s|{0}", ln.Source.Str))
+                        WriteLine(String.Format(" d|{0}", ln.Destination.Str))
+                End Select
+            Next
+        End If
     End Sub
 
     ''' <summary>
