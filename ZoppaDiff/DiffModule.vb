@@ -172,6 +172,7 @@ Module DiffModule
             Dim cur = order(0)
             order.Remove(cur)
 
+            ' オープンリストから現在の位置を取得してクローズドリストに移動
             open.Remove(cur)
             closed.Add(cur)
 
@@ -228,14 +229,17 @@ Module DiffModule
         Dim order As New BPlusTree(Of CostPosition)(AddressOf CostPositionComparer)
         order.Insert(startPos)
 
+        ' A*探索のメインループ
         Dim answer As CostPosition = Nothing
         Do While open.Count > 0
             Dim cur = order(0)
             order.Remove(cur)
 
+            ' 現在の位置をオープンリストからクローズドリストに移動
             open.Remove(cur)
             closed.Add(cur)
 
+            ' ゴール状態に到達したかチェック
             If cur.X >= source.Length AndAlso cur.Y >= destination.Length Then
                 answer = cur
                 Exit Do
@@ -594,6 +598,10 @@ Module DiffModule
         ''' <summary>編集操作の詳細（主にA*アルゴリズムでの置換操作の内容を格納）</summary>
         Private editChars As EditChar()
 
+        ''' <summary>
+        ''' 編集操作の種類と対象文字列を組み合わせた差分表示用の文字列を取得します
+        ''' </summary>
+        ''' <returns>分表示用の文字列</returns>
         Public ReadOnly Property EditString As String
             Get
                 Dim res As New StringBuilder()
@@ -624,6 +632,36 @@ Module DiffModule
             End Get
         End Property
 
+
+        ''' <summary>
+        ''' 特殊文字をエスケープして安全な文字列表現に変換します
+        ''' </summary>
+        ''' <param name="s">エスケープ処理を行う文字</param>
+        ''' <returns>
+        ''' エスケープ処理された文字列。以下の変換が行われます：
+        ''' <list type="bullet">
+        ''' <item>バックスラッシュ（\）→ \\（二重バックスラッシュ）</item>
+        ''' <item>左波括弧（{）→ \{（バックスラッシュエスケープ）</item>
+        ''' <item>右波括弧（}）→ \}（バックスラッシュエスケープ）</item>
+        ''' <item>その他の文字 → そのまま文字列として返す</item>
+        ''' </list>
+        ''' </returns>
+        ''' <remarks>
+        ''' この関数は<see cref="Answer.EditString"/>プロパティ内で使用され、
+        ''' 差分表示における特殊文字の適切なエスケープ処理を提供します。
+        ''' 波括弧（{ }）は差分表示フォーマットにおいて編集操作の境界を示すために
+        ''' 使用されるため、これらの文字がリテラル文字として表示される際には
+        ''' エスケープが必要になります。
+        ''' 
+        ''' <para>
+        ''' <strong>使用例：</strong><br/>
+        ''' バックスラッシュ文字 → "\\"<br/>
+        ''' 左波括弧文字 → "\{"<br/>
+        ''' 右波括弧文字 → "\}"<br/>
+        ''' 通常の文字 → そのまま
+        ''' </para>
+        ''' </remarks>
+        ''' <seealso cref="Answer.EditString"/>
         Private Shared Function EscapeString(s As Char) As String
             Select Case s
                 Case "\"c
