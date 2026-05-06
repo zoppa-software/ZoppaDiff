@@ -1,5 +1,7 @@
 ﻿Option Explicit On
 Option Strict On
+
+Imports System.Text
 Imports ZoppaDiff.Collections
 
 ''' <summary>
@@ -76,7 +78,7 @@ Module DiffModule
         ' 結果をトレースバックして最初のステップを構築
         Dim firstStepAnswer As New List(Of Answer)()
         Do While answer.From IsNot Nothing
-            firstStepAnswer.Add(New Answer(source, answer.From.X, answer.X, destination, answer.From.Y, answer.Y))
+            firstStepAnswer.Add(New Answer(source, answer.From.X, answer.X, destination, answer.From.Y, answer.Y, Nothing))
             answer = answer.From
         Loop
 
@@ -155,11 +157,11 @@ Module DiffModule
         Next
 
         ' A*アルゴリズムの初期化
-        Dim startPos As New CostPosition(Nothing, 0, 0, 0, 0)
+        Dim startPos As New CostPosition(Nothing, 0, 0, 0, 0, Nothing)
 
         Dim open As New SortedSet(Of CostPosition)()
         Dim closed As New SortedSet(Of CostPosition)()
-        open.Add(New CostPosition(Nothing, 0, 0, 0, 0))
+        open.Add(New CostPosition(Nothing, 0, 0, 0, 0, Nothing))
 
         Dim order As New BPlusTree(Of CostPosition)(AddressOf CostPositionComparer)
         order.Insert(startPos)
@@ -181,15 +183,17 @@ Module DiffModule
 
             ' 隣接する状態を生成
             If cur.X < source.Length AndAlso cur.Y < destination.Length Then
-                UpdatePosition(open, closed, order, CreateNewPosition(cur, 1, 1, ASterCharDiff(source(cur.X), destination(cur.Y)), srclen, destlen))
-                UpdatePosition(open, closed, order, CreateNewPosition(cur, 1, 0, source(cur.X).Length, srclen, destlen))
-                UpdatePosition(open, closed, order, CreateNewPosition(cur, 0, 1, destination(cur.Y).Length, srclen, destlen))
+                Dim editChars As New List(Of EditChar)()
+                Dim editCost As Integer = ASterCharDiff(source(cur.X), destination(cur.Y), editChars)
+                UpdatePosition(open, closed, order, CreateNewPosition(cur, 1, 1, editCost, srclen, destlen, editChars.ToArray()))
+                UpdatePosition(open, closed, order, CreateNewPosition(cur, 1, 0, source(cur.X).Length, srclen, destlen, Nothing))
+                UpdatePosition(open, closed, order, CreateNewPosition(cur, 0, 1, destination(cur.Y).Length, srclen, destlen, Nothing))
             Else
                 If cur.X < source.Length Then
-                    UpdatePosition(open, closed, order, CreateNewPosition(cur, 1, 0, source(cur.X).Length, srclen, destlen))
+                    UpdatePosition(open, closed, order, CreateNewPosition(cur, 1, 0, source(cur.X).Length, srclen, destlen, Nothing))
                 End If
                 If cur.Y < destination.Length Then
-                    UpdatePosition(open, closed, order, CreateNewPosition(cur, 0, 1, destination(cur.Y).Length, srclen, destlen))
+                    UpdatePosition(open, closed, order, CreateNewPosition(cur, 0, 1, destination(cur.Y).Length, srclen, destlen, Nothing))
                 End If
             End If
         Loop
@@ -197,7 +201,7 @@ Module DiffModule
         ' 結果をトレースバックして構築
         Dim ans As New List(Of Answer)()
         Do While answer.From IsNot Nothing
-            ans.Add(New Answer(source, answer.From.X, answer.X, destination, answer.From.Y, answer.Y, False))
+            ans.Add(New Answer(source, answer.From.X, answer.X, destination, answer.From.Y, answer.Y, answer.EditChars))
             answer = answer.From
         Loop
         ans.Reverse()
@@ -209,12 +213,13 @@ Module DiffModule
     ''' </summary>
     ''' <param name="source">比較元の文字列</param>
     ''' <param name="destination">比較先の文字列</param>
+    ''' <param name="editChars">編集操作の詳細を格納するリスト（置換操作の内容を文字として格納）</param>
     ''' <returns>編集距離（コスト）</returns>
     ''' <remarks>
     ''' このメソッドは文字レベルでの編集距離を計算し、A*差分アルゴリズムで使用されます
     ''' </remarks>
-    Private Function ASterCharDiff(source As String, destination As String) As Integer
-        Dim startPos As New CostPosition(Nothing, 0, 0, 0, 0)
+    Private Function ASterCharDiff(source As String, destination As String, editChars As List(Of EditChar)) As Integer
+        Dim startPos As New CostPosition(Nothing, 0, 0, 0, 0, Nothing)
 
         Dim open As New SortedSet(Of CostPosition)()
         Dim closed As New SortedSet(Of CostPosition)()
@@ -241,11 +246,11 @@ Module DiffModule
                 UpdatePosition(open, closed, order, CreateNewPosition(cur, 1, 1, 0, source.Length - cur.X, destination.Length - cur.Y))
             Else
                 ' 文字が一致しない場合は挿入/削除でコスト1
-                If cur.X < source.Length Then
-                    UpdatePosition(open, closed, order, CreateNewPosition(cur, 1, 0, 1, source.Length - cur.X, destination.Length - cur.Y))
-                End If
                 If cur.Y < destination.Length Then
                     UpdatePosition(open, closed, order, CreateNewPosition(cur, 0, 1, 1, source.Length - cur.X, destination.Length - cur.Y))
+                End If
+                If cur.X < source.Length Then
+                    UpdatePosition(open, closed, order, CreateNewPosition(cur, 1, 0, 1, source.Length - cur.X, destination.Length - cur.Y))
                 End If
             End If
         Loop
@@ -253,11 +258,25 @@ Module DiffModule
         ' 編集操作の数をカウント
         Dim ans As Integer = 0
         Do While answer.From IsNot Nothing
-            If answer.From.X = answer.X OrElse answer.From.Y = answer.Y Then
+            Dim edit As EditChar
+            If answer.From.X < answer.X AndAlso answer.From.Y = answer.Y Then
+                ' 削除
+                edit = New EditChar(EditTypeEnum.Delete, source(answer.From.X))
                 ans += 1
+            ElseIf answer.From.X = answer.X AndAlso answer.From.Y < answer.Y Then
+                ' 挿入
+                edit = New EditChar(EditTypeEnum.Insert, destination(answer.From.Y))
+                ans += 1
+            Else
+                ' 一致
+                edit = New EditChar(EditTypeEnum.Match, source(answer.From.X))
             End If
+            editChars.Add(edit)
+
             answer = answer.From
         Loop
+
+        editChars.Reverse()
         Return ans
     End Function
 
@@ -348,11 +367,12 @@ Module DiffModule
     ''' <param name="arrivalCost">到達コスト</param>
     ''' <param name="srclen">ソース配列の長さ配列</param>
     ''' <param name="destlen">デスティネーション配列の長さ配列</param>
+    ''' <param name="editChars">編集操作の詳細</param>
     ''' <returns>新しいコスト位置</returns>
-    Private Function CreateNewPosition(current As CostPosition, moveX As Integer, moveY As Integer, arrivalCost As Integer, srclen As Integer(), destlen As Integer()) As CostPosition
+    Private Function CreateNewPosition(current As CostPosition, moveX As Integer, moveY As Integer, arrivalCost As Integer, srclen As Integer(), destlen As Integer(), editChars() As EditChar) As CostPosition
         Dim x = current.X + moveX
         Dim y = current.Y + moveY
-        Return New CostPosition(current, current.X + moveX, current.Y + moveY, current.ArrivalCost + arrivalCost, Math.Abs(srclen(x) - destlen(y)))
+        Return New CostPosition(current, current.X + moveX, current.Y + moveY, current.ArrivalCost + arrivalCost, Math.Abs(srclen(x) - destlen(y)), editChars)
     End Function
 
     ''' <summary>
@@ -366,7 +386,7 @@ Module DiffModule
     ''' <param name="restY">Y軸の残り長さ</param>
     ''' <returns>新しいコスト位置</returns>
     Private Function CreateNewPosition(current As CostPosition, moveX As Integer, moveY As Integer, arrivalCost As Integer, restX As Integer, restY As Integer) As CostPosition
-        Return New CostPosition(current, current.X + moveX, current.Y + moveY, current.ArrivalCost + arrivalCost, Math.Abs(restX - restY))
+        Return New CostPosition(current, current.X + moveX, current.Y + moveY, current.ArrivalCost + arrivalCost, Math.Abs(restX - restY), Nothing)
     End Function
 
     ''' <summary>
@@ -457,6 +477,9 @@ Module DiffModule
         ''' <summary>ゴールまでの推定コスト（ヒューリスティック）</summary>
         Public ReadOnly Property HeuristicCost As Integer
 
+        ''' <summary>編集操作の詳細（主にA*アルゴリズムでの置換操作の内容を格納）</summary>
+        Public ReadOnly Property EditChars As EditChar()
+
         ''' <summary>総コスト（到達コスト + ヒューリスティックコスト）</summary>
         Public ReadOnly Property TotalCost As Integer
             Get
@@ -472,12 +495,14 @@ Module DiffModule
         ''' <param name="y">Y軸の位置</param>
         ''' <param name="arrival">到達コスト</param>
         ''' <param name="heuristic">ヒューリスティックコスト</param>
-        Public Sub New([from] As CostPosition, x As Integer, y As Integer, arrival As Integer, heuristic As Integer)
+        ''' <param name="editChars">編集操作の詳細を表す配列</param>
+        Public Sub New([from] As CostPosition, x As Integer, y As Integer, arrival As Integer, heuristic As Integer, editChars As EditChar())
             Me.From = [from]
             Me.X = x
             Me.Y = y
             Me.ArrivalCost = arrival
             Me.HeuristicCost = heuristic
+            Me.EditChars = editChars
         End Sub
 
         ''' <summary>
@@ -508,6 +533,48 @@ Module DiffModule
     End Class
 
     ''' <summary>
+    ''' 文字レベルでの編集操作を表す構造体
+    ''' </summary>
+    ''' <remarks>
+    ''' A*アルゴリズムによる文字単位の差分計算で使用され、
+    ''' 個別の文字に対する編集操作（一致、挿入、削除）の詳細を格納します。
+    ''' </remarks>
+    Public Structure EditChar
+        ''' <summary>
+        ''' 編集操作の種類を取得します
+        ''' </summary>
+        ''' <value>
+        ''' <see cref="EditTypeEnum"/>の値：
+        ''' <list type="bullet">
+        ''' <item><see cref="EditTypeEnum.Match"/>: 文字が一致</item>
+        ''' <item><see cref="EditTypeEnum.Insert"/>: 文字の挿入</item>
+        ''' <item><see cref="EditTypeEnum.Delete"/>: 文字の削除</item>
+        ''' </list>
+        ''' </value>
+        Public ReadOnly Property EditType As EditTypeEnum
+
+        ''' <summary>
+        ''' 編集操作の対象となる文字を取得します
+        ''' </summary>
+        ''' <value>
+        ''' 編集操作に関連する文字。
+        ''' 挿入操作の場合は挿入される文字、削除操作の場合は削除される文字、
+        ''' 一致操作の場合は一致する文字を表します。
+        ''' </value>
+        Public ReadOnly Property EditChar As Char
+
+        ''' <summary>
+        ''' 編集操作の種類と対象文字を指定してEditChar構造体を初期化します
+        ''' </summary>
+        ''' <param name="EditType">編集操作の種類</param>
+        ''' <param name="EditChar">編集操作の対象となる文字</param>
+        Public Sub New(EditType As EditTypeEnum, EditChar As Char)
+            Me.EditType = EditType
+            Me.EditChar = EditChar
+        End Sub
+    End Structure
+
+    ''' <summary>
     ''' 差分操作の結果を表すクラス
     ''' </summary>
     ''' <remarks>
@@ -523,6 +590,52 @@ Module DiffModule
 
         ''' <summary>デスティネーション文字列</summary>
         Public ReadOnly Property Destination As String
+
+        ''' <summary>編集操作の詳細（主にA*アルゴリズムでの置換操作の内容を格納）</summary>
+        Private editChars As EditChar()
+
+        Public ReadOnly Property EditString As String
+            Get
+                Dim res As New StringBuilder()
+
+                Dim mode = EditTypeEnum.Match
+                For Each edit In Me.EditChars
+                    If edit.EditType <> mode Then
+                        If mode <> EditTypeEnum.Match Then
+                            res.Append("}")
+                        End If
+                        Select Case edit.EditType
+                            Case EditTypeEnum.Match
+                                res.Append(EscapeString(edit.EditChar))
+                            Case EditTypeEnum.Delete
+                                res.Append("{D:" + EscapeString(edit.EditChar))
+                            Case EditTypeEnum.Insert
+                                res.Append("{I:" + EscapeString(edit.EditChar))
+                        End Select
+                        mode = edit.EditType
+                    Else
+                        res.Append(EscapeString(edit.EditChar))
+                    End If
+                Next
+                If mode <> EditTypeEnum.Match Then
+                    res.Append("}")
+                End If
+                Return res.ToString()
+            End Get
+        End Property
+
+        Private Shared Function EscapeString(s As Char) As String
+            Select Case s
+                Case "\"c
+                    Return "\\"
+                Case "{"c
+                    Return "\{"
+                Case "}"c
+                    Return "\}"
+                Case Else
+                    Return s.ToString()
+            End Select
+        End Function
 
         ''' <summary>
         ''' 編集タイプと文字列を指定してAnswerを初期化します
@@ -545,14 +658,14 @@ Module DiffModule
         ''' <param name="destination">デスティネーション配列</param>
         ''' <param name="prevY">前のY位置</param>
         ''' <param name="nextY">次のY位置</param>
-        ''' <param name="isMatch">一致かどうか（デフォルトTrue）</param>
-        Public Sub New(source() As String, prevX As Integer, nextX As Integer, destination() As String, prevY As Integer, nextY As Integer, Optional isMatch As Boolean = True)
+        ''' <param name="editChars">編集操作の詳細</param>
+        Public Sub New(source() As String, prevX As Integer, nextX As Integer, destination() As String, prevY As Integer, nextY As Integer, editChars As EditChar())
             ' 位置の変化から編集タイプを決定
             If nextX = prevX Then
                 Me.EditType = EditTypeEnum.Insert
             ElseIf nextY = prevY Then
                 Me.EditType = EditTypeEnum.Delete
-            ElseIf isMatch Then
+            ElseIf editChars Is Nothing Then
                 Me.EditType = EditTypeEnum.Match
             Else
                 Me.EditType = EditTypeEnum.Diff
@@ -570,6 +683,9 @@ Module DiffModule
                     Me.Source = source(prevX)
                     Me.Destination = ""
             End Select
+
+            ' 編集情報
+            Me.EditChars = editChars
         End Sub
 
         ''' <summary>

@@ -31,7 +31,7 @@ Public Module MainModule
         End If
 
         ' エンコード指定を読み込む
-        Dim encode As Text.Encoding = Text.Encoding.Default
+        Dim encode As Text.Encoding = Text.Encoding.UTF8
         If analysis.HasSwitch(ENCODE_SW) Then
             encode = GetEncoder(analysis.GetSwitchParameter(ENCODE_SW)(0))
         End If
@@ -56,7 +56,8 @@ Public Module MainModule
                 Case DiffModule.EditTypeEnum.Match
                     Console.WriteLine("   " & ln.Source)
                 Case DiffModule.EditTypeEnum.Diff
-                    Console.WriteLine("Rs:" & ln.Source)
+                    Console.WriteLine("R :" & ln.EditString)
+                    Console.WriteLine(" s:" & ln.Source)
                     Console.WriteLine(" d:" & ln.Destination)
             End Select
         Next
@@ -72,7 +73,7 @@ Public Module MainModule
     ''' <exception cref="IOException">ファイルの読み込み中にエラーが発生した場合にスローされます。</exception>
     Private Function ReadLines(path As String, encode As Text.Encoding, errMessage As String) As String()
         Try
-            Using reader = If(encode IsNot Nothing, New StreamReader(path, encode), New StreamReader(path))
+            Using reader = New StreamReader(path, encode)
                 Dim lines As New List(Of String)
                 While Not reader.EndOfStream
                     lines.Add(reader.ReadLine())
