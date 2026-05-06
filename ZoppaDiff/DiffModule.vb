@@ -190,7 +190,7 @@ Public Module DiffModule
             If cur.X < source.Length AndAlso cur.Y < destination.Length Then
                 ' 差異、挿入、削除の各操作を評価して次の位置に移動
                 Dim editChars As New List(Of EditChar)(source(cur.X).Str.Length + destination(cur.Y).Str.Length)
-                Dim editCost As Integer = ASterCharDiff(source(cur.X).Str, destination(cur.Y).Str, editChars)
+                Dim editCost As Integer = AStarCharDiff(source(cur.X).Str, destination(cur.Y).Str, editChars)
                 UpdatePosition(open, closed, order, CreateNewPosition(cur, 1, 1, editCost, srclen, destlen, editChars.ToArray()))
                 UpdatePosition(open, closed, order, CreateNewPosition(cur, 1, 0, source(cur.X).Str.Length, srclen, destlen, Nothing))
                 UpdatePosition(open, closed, order, CreateNewPosition(cur, 0, 1, destination(cur.Y).Str.Length, srclen, destlen, Nothing))
@@ -257,7 +257,7 @@ Public Module DiffModule
     ''' <remarks>
     ''' このメソッドは文字レベルでの編集距離を計算し、A*差分アルゴリズムで使用されます
     ''' </remarks>
-    Public Function ASterCharDiff(source As String, destination As String, editChars As List(Of EditChar)) As Integer
+    Public Function AStarCharDiff(source As String, destination As String, editChars As List(Of EditChar)) As Integer
         ' 開始位置の初期化
         Dim startPos As New CostPosition(Nothing, 0, 0, 0, 0, Nothing)
 
