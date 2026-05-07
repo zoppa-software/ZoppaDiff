@@ -10,16 +10,15 @@ Imports ZoppaDiff.Collections
 Public Module DiffModule
 
     ''' <summary>編集操作の種類を表す列挙型</summary>
-    <Flags>
     Public Enum EditTypeEnum
         ''' <summary>一致（変更なし）</summary>
-        Match = 0
+        Match
         ''' <summary>差分（置換）</summary>
-        Diff = 1
+        Diff
         ''' <summary>挿入</summary>
-        Insert = 2
+        Insert
         ''' <summary>削除</summary>
-        Delete = 4
+        Delete
     End Enum
 
     ''' <summary>空の行を表すLineInfoオブジェクト</summary>
@@ -46,9 +45,7 @@ Public Module DiffModule
         Dim cur As New VisitPosition(Nothing, 0, 0)
 
         ' 最初の一致部分をスキップ
-        Do While cur.X < source.Length AndAlso cur.Y < destination.Length AndAlso source(cur.X).Str = destination(cur.Y).Str
-            cur = New VisitPosition(cur, cur.X + 1, cur.Y + 1)
-        Loop
+        cur = MoveMatchPosition(source, destination, cur)
         visits.Add(0, cur)
 
         ' Myers差分アルゴリズムのメインループ
@@ -64,10 +61,8 @@ Public Module DiffModule
                     cur = New VisitPosition(prev, prev.X + 1, (prev.X + 1) - k)
                 End If
 
-                ' 一致する部分を進める
-                Do While cur.X < source.Length AndAlso cur.Y < destination.Length AndAlso source(cur.X).Str = destination(cur.Y).Str
-                    cur = New VisitPosition(cur, cur.X + 1, cur.Y + 1)
-                Loop
+                ' 一致部分をスキップ
+                cur = MoveMatchPosition(source, destination, cur)
                 visits(k) = cur
 
                 ' 終端に到達したかチェック
@@ -84,7 +79,18 @@ Public Module DiffModule
         ' 結果をトレースバックして最初のステップを構築
         Dim firstStepAnswer As New List(Of Answer)()
         Do While answer.From IsNot Nothing
-            firstStepAnswer.Add(New Answer(source, answer.From.X, answer.X, destination, answer.From.Y, answer.Y, Nothing))
+            Dim x = answer.X
+            Dim y = answer.Y
+
+            ' 連続する一致を個別のAnswerとして追加
+            Do While x - answer.From.X > 1 AndAlso y - answer.From.Y > 1
+                x -= 1
+                y -= 1
+                firstStepAnswer.Add(New Answer(source, x, x + 1, destination, y, y + 1, Nothing))
+            Loop
+
+            ' 最初の遷移を追加
+            firstStepAnswer.Add(New Answer(source, answer.From.X, x, destination, answer.From.Y, y, Nothing))
             answer = answer.From
         Loop
 
@@ -99,6 +105,7 @@ Public Module DiffModule
                         finalAnswer.Add(firstStepAnswer(i))
                         i -= 1
                     Loop
+                    ' 内側のループで処理完了、外側は何もしない
 
                 Case EditTypeEnum.Insert, EditTypeEnum.Delete
                     ' 挿入と削除のグループに対してA*差分を適用
@@ -116,10 +123,13 @@ Public Module DiffModule
                         i -= 1
                     Loop
                     finalAnswer.AddRange(AStarDiff(tmpSrc.ToArray(), tmpDest.ToArray()))
+                    ' 内側のループで処理完了
 
                 Case Else
-                    Throw New InvalidOperationException($"不正な編集タイプ: {firstStepAnswer(i).EditType}")
+                    ' 予期しない編集タイプ（通常は発生しない）
+                    i -= 1
             End Select
+            ' 各ケースで適切にiが更新されているため、ここでは何もしない
         Loop
 
         Return finalAnswer
@@ -136,6 +146,27 @@ Public Module DiffModule
             result(i) = New LineInfo(i, arr(i))
         Next
         Return result
+    End Function
+
+    ''' <summary>Myers差分アルゴリズムの訪問位置を移動させ、一致する部分をスキップします</summary>
+    ''' <param name="source">比較元のLineInfo配列</param>
+    ''' <param name="destination">比較先のLineInfo配列</param>
+    ''' <param name="cur">現在の訪問位置</param>
+    ''' <returns>一致部分をスキップした新しい訪問位置</returns>
+    Private Function MoveMatchPosition(source As LineInfo(), destination As LineInfo(), cur As VisitPosition) As VisitPosition
+        ' 連続する一致をカウントする
+        Dim matchCount As Integer = 0
+        Do While cur.X + matchCount < source.Length AndAlso
+                 cur.Y + matchCount < destination.Length AndAlso
+                 source(cur.X + matchCount).Str = destination(cur.Y + matchCount).Str
+            matchCount += 1
+        Loop
+
+        ' 一致部分がある場合は、訪問位置を更新
+        If matchCount > 0 Then
+            cur = New VisitPosition(cur, cur.X + matchCount, cur.Y + matchCount)
+        End If
+        Return cur
     End Function
 
     ''' <summary>
@@ -163,15 +194,15 @@ Public Module DiffModule
         ' A*アルゴリズムの初期化
         Dim startPos As New CostPosition(Nothing, 0, 0, 0, 0, Nothing)
 
-        Dim open As New SortedSet(Of CostPosition)()
-        Dim closed As New SortedSet(Of CostPosition)()
-        open.Add(New CostPosition(Nothing, 0, 0, 0, 0, Nothing))
-
+        Dim open As New HashSet(Of CostPosition)()
+        Dim closed As New HashSet(Of CostPosition)()
         Dim order As New BPlusTree(Of CostPosition)(AddressOf CostPositionComparer)
+        open.Add(New CostPosition(Nothing, 0, 0, 0, 0, Nothing))
         order.Insert(startPos)
 
+        Dim currentNode As CostPosition = Nothing
+
         ' A*探索のメインループ
-        Dim answer As CostPosition = Nothing
         Do While order.Count > 0
             Dim cur = order(0)
             order.Remove(cur)
@@ -182,7 +213,7 @@ Public Module DiffModule
 
             ' ゴール状態に到達したかチェック
             If cur.X >= source.Length AndAlso cur.Y >= destination.Length Then
-                answer = cur
+                currentNode = cur
                 Exit Do
             End If
 
@@ -208,9 +239,9 @@ Public Module DiffModule
         ' 結果をトレースバックして構築
         Dim ans As New List(Of Answer)()
         Dim traceStack As New Stack(Of CostPosition)()
-        Do While answer IsNot Nothing AndAlso answer.From IsNot Nothing
-            traceStack.Push(answer)
-            answer = answer.From
+        Do While currentNode IsNot Nothing AndAlso currentNode.From IsNot Nothing
+            traceStack.Push(currentNode)
+            currentNode = currentNode.From
         Loop
         Do While traceStack.Count > 0
             Dim pos = traceStack.Pop()
@@ -293,8 +324,8 @@ Public Module DiffModule
         Dim startPos As New CostPosition(Nothing, 0, 0, 0, 0, Nothing)
 
         ' A*アルゴリズムの初期化
-        Dim open As New SortedSet(Of CostPosition)()
-        Dim closed As New SortedSet(Of CostPosition)()
+        Dim open As New HashSet(Of CostPosition)()
+        Dim closed As New HashSet(Of CostPosition)()
         Dim order As New BPlusTree(Of CostPosition)(AddressOf CostPositionComparer)
 
         ' 開始位置をオープンリストと評価リストに追加
@@ -419,8 +450,8 @@ Public Module DiffModule
     ''' </list>
     ''' B+ツリーは最小コストの位置を効率的に取得するために使用されます。
     ''' </remarks>
-    Private Sub UpdatePosition(open As SortedSet(Of CostPosition),
-                               closed As SortedSet(Of CostPosition),
+    Private Sub UpdatePosition(open As HashSet(Of CostPosition),
+                               closed As HashSet(Of CostPosition),
                                order As BPlusTree(Of CostPosition),
                                newCur As CostPosition)
         ' クローズドリストに既に存在する場合は処理をスキップ
@@ -616,6 +647,23 @@ Public Module DiffModule
             Me.EditChars = editChars
         End Sub
 
+        ''' <summary>他のコスト位置との等価性を判断します</summary>
+        ''' <param name="obj">比較対象のオブジェクト</param>
+        ''' <returns>等価であればtrue、そうでなければfalse</returns>
+        Overrides Function Equals(obj As Object) As Boolean
+            Dim other = TryCast(obj, CostPosition)
+            If other Is Nothing Then
+                Return False
+            End If
+            Return Me.X = other.X AndAlso Me.Y = other.Y
+        End Function
+
+        ''' <summary>コスト位置のハッシュコードを計算します</summary>
+        ''' <returns>ハッシュコード</returns>
+        Public Overrides Function GetHashCode() As Integer
+            Return (Me.X << 16) Xor Me.Y
+        End Function
+
         ''' <summary>
         ''' 他のコスト位置との比較を行います
         ''' </summary>
@@ -714,36 +762,50 @@ Public Module DiffModule
         ''' <summary>編集操作の詳細（主にA*アルゴリズムでの置換操作の内容を格納）</summary>
         Private ReadOnly editChars As EditChar()
 
+        ''' <summary>編集操作の種類と対象文字列を組み合わせた差分表示用の文字列をキャッシュします</summary>
+        Private _editString As String = Nothing
+
         ''' <summary>
         ''' 編集操作の種類と対象文字列を組み合わせた差分表示用の文字列を取得します
         ''' </summary>
         ''' <returns>分表示用の文字列</returns>
         Public ReadOnly Property EditString As String
             Get
-                ' 編集操作の詳細がない場合は空文字列を返す
-                If Me.editChars Is Nothing OrElse Me.editChars.Length = 0 Then
-                    Return String.Empty
+                If _editString Is Nothing Then
+                    _editString = BuildEditString()
                 End If
-
-                ' 文字列ビルダーを使用して編集操作の詳細を構築
-                Dim res As New StringBuilder()
-                Dim currentMode = EditTypeEnum.Match
-
-                ' 編集操作の詳細を順に処理して、モードの切り替えや文字の追加を行う
-                For Each edit In Me.editChars
-                    If edit.EditType <> currentMode Then
-                        CloseCurrentMode(res, currentMode)
-                        OpenNewMode(res, edit.EditType, edit.EditChar)
-                        currentMode = edit.EditType
-                    Else
-                        AppendCharacterForCurrentMode(res, edit.EditChar)
-                    End If
-                Next
-
-                CloseCurrentMode(res, currentMode)
-                Return res.ToString()
+                Return _editString
             End Get
         End Property
+
+        ''' <summary>
+        ''' 編集操作の種類と対象文字列を組み合わせた差分表示用の文字列を構築します
+        ''' </summary>
+        ''' <returns>編集操作の詳細を表す文字列</returns>
+        Private Function BuildEditString() As String
+            ' 編集操作の詳細がない場合は空文字列を返す
+            If Me.editChars Is Nothing OrElse Me.editChars.Length = 0 Then
+                Return String.Empty
+            End If
+
+            ' 文字列ビルダーを使用して編集操作の詳細を構築
+            Dim res As New StringBuilder()
+            Dim currentMode = EditTypeEnum.Match
+
+            ' 編集操作の詳細を順に処理して、モードの切り替えや文字の追加を行う
+            For Each edit In Me.editChars
+                If edit.EditType <> currentMode Then
+                    CloseCurrentMode(res, currentMode)
+                    OpenNewMode(res, edit.EditType, edit.EditChar)
+                    currentMode = edit.EditType
+                Else
+                    AppendCharacterForCurrentMode(res, edit.EditChar)
+                End If
+            Next
+
+            CloseCurrentMode(res, currentMode)
+            Return res.ToString()
+        End Function
 
         ''' <summary>
         ''' 編集タイプと文字列を指定してAnswerを初期化します
