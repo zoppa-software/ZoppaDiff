@@ -9,9 +9,8 @@ Imports ZoppaDiff.Collections
 ''' </summary>
 Public Module DiffModule
 
-    ''' <summary>
-    ''' 編集操作の種類を表す列挙型
-    ''' </summary>
+    ''' <summary>編集操作の種類を表す列挙型</summary>
+    <Flags>
     Public Enum EditTypeEnum
         ''' <summary>一致（変更なし）</summary>
         Match = 0
@@ -55,6 +54,7 @@ Public Module DiffModule
         ' Myers差分アルゴリズムのメインループ
         Dim answer As VisitPosition = Nothing
         For d As Integer = 1 To source.Length + destination.Length
+            ' Myers差分アルゴリズムはK-lineを-dから+dまで2ずつ増やして探索
             For k = -d To d Step 2
                 If k = -d OrElse (k <> d AndAlso visits(k - 1).X < visits(k + 1).X) Then
                     Dim prev = visits(k + 1)
@@ -90,37 +90,37 @@ Public Module DiffModule
 
         ' A*アルゴリズムを使用して詳細な差分を計算
         Dim finalAnswer As New List(Of Answer)(firstStepAnswer.Count)
-        Dim j As Integer
-        For i As Integer = firstStepAnswer.Count - 1 To 0 Step -1
-            j = i
+        Dim i As Integer = firstStepAnswer.Count - 1
+        Do While i >= 0
             Select Case firstStepAnswer(i).EditType
                 Case EditTypeEnum.Match
                     ' 連続する一致をグループ化
-                    Do While j >= 0 AndAlso firstStepAnswer(j).EditType = EditTypeEnum.Match
-                        finalAnswer.Add(firstStepAnswer(j))
-                        j -= 1
+                    Do While i >= 0 AndAlso firstStepAnswer(i).EditType = EditTypeEnum.Match
+                        finalAnswer.Add(firstStepAnswer(i))
+                        i -= 1
                     Loop
-                    i = j + 1
 
                 Case EditTypeEnum.Insert, EditTypeEnum.Delete
                     ' 挿入と削除のグループに対してA*差分を適用
                     Dim tmpSrc As New List(Of LineInfo)()
                     Dim tmpDest As New List(Of LineInfo)()
-                    Do While j >= 0
-                        Select Case firstStepAnswer(j).EditType
+                    Do While i >= 0
+                        Select Case firstStepAnswer(i).EditType
                             Case EditTypeEnum.Match
                                 Exit Do
                             Case EditTypeEnum.Insert
-                                tmpDest.Add(firstStepAnswer(j).Destination)
+                                tmpDest.Add(firstStepAnswer(i).Destination)
                             Case EditTypeEnum.Delete
-                                tmpSrc.Add(firstStepAnswer(j).Source)
+                                tmpSrc.Add(firstStepAnswer(i).Source)
                         End Select
-                        j -= 1
+                        i -= 1
                     Loop
                     finalAnswer.AddRange(AStarDiff(tmpSrc.ToArray(), tmpDest.ToArray()))
-                    i = j + 1
+
+                Case Else
+                    Throw New InvalidOperationException($"不正な編集タイプ: {firstStepAnswer(i).EditType}")
             End Select
-        Next
+        Loop
 
         Return finalAnswer
     End Function
@@ -172,7 +172,7 @@ Public Module DiffModule
 
         ' A*探索のメインループ
         Dim answer As CostPosition = Nothing
-        Do While open.Count > 0
+        Do While order.Count > 0
             Dim cur = order(0)
             order.Remove(cur)
 
@@ -190,7 +190,7 @@ Public Module DiffModule
             If cur.X < source.Length AndAlso cur.Y < destination.Length Then
                 ' 差異、挿入、削除の各操作を評価して次の位置に移動
                 Dim editChars As New List(Of EditChar)(source(cur.X).Str.Length + destination(cur.Y).Str.Length)
-                Dim editCost As Integer = AStarCharDiff(source(cur.X).Str, destination(cur.Y).Str, editChars)
+                Dim editCost As Integer = SplitAStarCharDiff(source(cur.X).Str, destination(cur.Y).Str, editChars)
                 UpdatePosition(open, closed, order, CreateNewPosition(cur, 1, 1, editCost, srclen, destlen, editChars.ToArray()))
                 UpdatePosition(open, closed, order, CreateNewPosition(cur, 1, 0, source(cur.X).Str.Length, srclen, destlen, Nothing))
                 UpdatePosition(open, closed, order, CreateNewPosition(cur, 0, 1, destination(cur.Y).Str.Length, srclen, destlen, Nothing))
@@ -247,6 +247,37 @@ Public Module DiffModule
         Return result
     End Function
 
+    ''' <summary>2つの文字列間の編集距離をA*アルゴリズムで計算します</summary>
+    ''' <param name="source">比較元の文字列</param>
+    ''' <param name="destination">比較先の文字列</param>
+    ''' <param name="editChars">編集操作の詳細を格納するリスト（置換操作の内容を文字として格納）</param>
+    ''' <returns>編集距離（コスト）</returns>
+    Private Function SplitAStarCharDiff(source As String, destination As String, editChars As List(Of EditChar)) As Integer
+        ' 文字列の先頭の空白をスキップして、空白部分と非空白部分を分割
+        Dim ssplit = IndexOfNotSpace(source)
+        Dim dsplit = IndexOfNotSpace(destination)
+
+        ' 先頭の空白部分のコストを計算
+        Dim cost = AStarCharDiff(source.Substring(0, ssplit), destination.Substring(0, dsplit), editChars)
+
+        ' 非空白部分のコストを計算
+        cost += AStarCharDiff(source.Substring(ssplit), destination.Substring(dsplit), editChars)
+
+        Return cost
+    End Function
+
+    ''' <summary>文字列の先頭から最初の非空白文字の位置を返します</summary>
+    ''' <param name="str">入力文字列</param>
+    ''' <returns>最初の非空白文字のインデックス。全て空白の場合は文字列の長さを返します。</returns>
+    Private Function IndexOfNotSpace(str As String) As Integer
+        For i As Integer = 0 To str.Length - 1
+            If Not Char.IsWhiteSpace(str(i)) Then
+                Return i
+            End If
+        Next
+        Return str.Length
+    End Function
+
     ''' <summary>
     ''' A*アルゴリズムを使用して2つの文字列間の編集距離を計算します
     ''' </summary>
@@ -272,7 +303,7 @@ Public Module DiffModule
 
         ' A*探索のメインループ
         Dim answer As CostPosition = Nothing
-        Do While open.Count > 0
+        Do While order.Count > 0
             ' 最小コストの位置を取得
             Dim cur = order(0)
             order.Remove(cur)
