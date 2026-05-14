@@ -50,31 +50,36 @@ Public Module DiffModule
 
         ' Myers差分アルゴリズムのメインループ
         Dim answer As VisitPosition = Nothing
-        For d As Integer = 1 To source.Length + destination.Length
-            ' Myers差分アルゴリズムはK-lineを-dから+dまで2ずつ増やして探索
-            For k = -d To d Step 2
-                If k = -d OrElse (k <> d AndAlso visits(k - 1).X < visits(k + 1).X) Then
-                    Dim prev = visits(k + 1)
-                    cur = New VisitPosition(prev, prev.X, prev.X - k)
-                Else
-                    Dim prev = visits(k - 1)
-                    cur = New VisitPosition(prev, prev.X + 1, (prev.X + 1) - k)
-                End If
+        If cur.X < source.Length OrElse cur.Y < destination.Length Then
+            For d As Integer = 1 To source.Length + destination.Length
+                ' Myers差分アルゴリズムはK-lineを-dから+dまで2ずつ増やして探索
+                For k = -d To d Step 2
+                    If k = -d OrElse (k <> d AndAlso visits(k - 1).X < visits(k + 1).X) Then
+                        Dim prev = visits(k + 1)
+                        cur = New VisitPosition(prev, prev.X, prev.X - k)
+                    Else
+                        Dim prev = visits(k - 1)
+                        cur = New VisitPosition(prev, prev.X + 1, (prev.X + 1) - k)
+                    End If
 
-                ' 一致部分をスキップ
-                cur = MoveMatchPosition(source, destination, cur)
-                visits(k) = cur
+                    ' 一致部分をスキップ
+                    cur = MoveMatchPosition(source, destination, cur)
+                    visits(k) = cur
 
-                ' 終端に到達したかチェック
-                If cur.X >= source.Length AndAlso cur.Y >= destination.Length Then
-                    answer = cur
+                    ' 終端に到達したかチェック
+                    If cur.X >= source.Length AndAlso cur.Y >= destination.Length Then
+                        answer = cur
+                        Exit For
+                    End If
+                Next
+                If answer IsNot Nothing Then
                     Exit For
                 End If
             Next
-            If answer IsNot Nothing Then
-                Exit For
-            End If
-        Next
+        Else
+            ' 最初から完全に一致している場合は、最初の訪問位置が答えになります
+            answer = cur
+        End If
 
         ' 結果をトレースバックして最初のステップを構築
         Dim firstStepAnswer As New List(Of Answer)()
